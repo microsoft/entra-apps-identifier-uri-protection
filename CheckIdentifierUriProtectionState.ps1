@@ -1,7 +1,7 @@
 #Requires -Version 7.2.0
 <#
 .SYNOPSIS
-    Powershell script to check the current status of the NonDefaultUriAddition restriction on the Tenant Default Application Management Policy.
+    Powershell script to check the current status of the NonDefaultUriAddition or uriAdditionWithoutUniqueTenantIdentifier restriction on the Tenant Default Application Management Policy.
 .DESCRIPTION
     This PowerShell script will check the current state of the NonDefaultUriAddition restriction on the Tenant Default Application Management Policy and recommend
     the next steps to take.  The NonDefaultUriAddition restriction is a security feature that restricts the ability of applications to use non-default URIs.
@@ -21,6 +21,9 @@
     If the script should logout from MS Graph at the end. You may also logout separately using 
     Disconnect-MgGraph (https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/disconnect-mggraph?view=graph-powershell-1.0).
     Default: True
+.PARAMETER Restriction
+    The restriction to check: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'.
+    Default: uriAdditionWithoutUniqueTenantIdentifier
 .EXAMPLE
     CheckIdentifierUriProtectionState.ps1
     To run the script and return the current state of the NonDefaultUriAddition restriction on the Tenant Default Application Management Policy.
@@ -53,7 +56,12 @@ param(
         [Disconnect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/disconnect-mggraph?view=graph-powershell-1.0).
         Default: True"
     )]
-    [bool]$Logout = $true
+    [bool]$Logout = $true,
+    [Parameter(
+        HelpMessage="The restriction to check: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("nonDefaultUriAddition", "uriAdditionWithoutUniqueTenantIdentifier")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier"
 )
 
 Write-Host "Script starting. Confirming environment setup..."
@@ -74,33 +82,56 @@ if ($true -eq $Login) {
 }
 
 # Get Tenant Application Management Policy
-$Tenant_Policy = Get-TenantApplicationManagementPolicy
-Write-Verbose $Tenant_Policy
-
-$isStateSetByMicrosoft = $Tenant_Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition.isStateSetByMicrosoft
-$IsEnabled = $Tenant_Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition.state
-
-if ($null -eq $Tenant_Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition) {
-    Write-Message -Color "Yellow" -Message "IdentifierUri protection is disabled. It may be enabled by Microsoft in the future. Enable yourself by running ./EnableIdentifierUriProtection.ps1, or opt-out from any future enablement by running ./DisableIdentifierUriProtection.ps1."
+try {
+    $Tenant_Policy = Get-TenantApplicationManagementPolicy
+    Write-Verbose $Tenant_Policy
 }
-elseif ("disabled" -eq $IsEnabled) {
-    Write-Message -Color "Red" -Message "IdentifierUri protection is disabled and will not be enabled by Microsoft. Enable yourself by running ./EnableIdentifierUriProtection.ps1"
+catch {
+    Write-Error "Failed to get Tenant Application Management Policy. Please check your logs for errors and try again."
+    Write-Error "Error: $($_.Exception.Message)"
+    Invoke-Exit $Logout
+    return
+}
+
+# Determine which restriction to check
+if ($Restriction -eq "uriAdditionWithoutUniqueTenantIdentifier") {
+    $RestrictionObj = $Tenant_Policy.applicationRestrictions.identifierUris.uriAdditionWithoutUniqueTenantIdentifier
+} elseif ($Restriction -eq "nonDefaultUriAddition") {
+    $RestrictionObj = $Tenant_Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition
 } else {
-    if ($true -eq $isStateSetByMicrosoft) {
-        Write-Message -Message "IdentifierUri protection is enabled. This was done by Microsoft. You can disable by running ./DisableIdentifierUriProtection (Not recommended)."
-    } else {
-        Write-Message -Message "IdentifierUri protection is enabled."
-    }
+    Write-Error "Invalid restriction specified. Please use 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'."
+    Invoke-Exit $Logout
+    return
 }
 
-if ($true -eq $Logout) {
-    Start-Logout
+if ($null -eq $RestrictionObj) {
+    Write-Message -Color "Yellow" -Message "IdentifierUris protection '$Restriction' is disabled. It may be enabled by Microsoft in the future. Enable yourself by running ./EnableIdentifierUriProtection.ps1, or opt-out from any future enablement by running ./DisableIdentifierUriProtection.ps1."
+    Invoke-Exit $Logout
+    return
 }
+
+# Get the restriction state
+$isStateSetByMicrosoft = $RestrictionObj.isStateSetByMicrosoft
+$IsEnabled = $RestrictionObj.state
+
+if ("disabled" -eq $IsEnabled) {
+    Write-Message -Color "Red" -Message "IdentifierUris protection '$Restriction' is disabled and will not be enabled by Microsoft. Enable yourself by running ./EnableIdentifierUriProtection.ps1"
+    Invoke-Exit $Logout
+    return
+}
+
+if ($true -eq $isStateSetByMicrosoft) {
+    Write-Message -Message "IdentifierUris protection '$Restriction' is enabled. This was done by Microsoft. You can disable by running ./DisableIdentifierUriProtection.ps1 (Not recommended)."
+} else {
+    Write-Message -Message "IdentifierUris protection '$Restriction' is enabled."
+}
+
+Invoke-Exit $Logout
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCg0AjBP+XO/G0N
-# o2XOMAq1FRs0nb3tmtSpgE/NzS9KmqCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCQxRNsgCnWhZj7
+# GOnU0w/To2GJSITHvJv9+Oy74sz9qKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -121,11 +152,11 @@ if ($true -eq $Logout) {
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIJ6jIhtgtmBLrv2R+iOew7xoT1MK+r6ZNQEO
-# OjSRhb0SMA0GCSqGSIb3DQEBAQUABIIBADRYA8KYzQctIjc4yoBPigwhgglL28Uf
-# Rt4H+6hXkmsw98++8OhpbavRjVYbB2N30G9nVKFGJvI6KzCpBIuXaCV06RfQk5QC
-# 4tpOiJLgEJUbCXVQ2xGQ7diKe9TsXNGEpeC6EU3xttBkP2bRdR/z/fxfJyJQZVhP
-# fe7YNZzz8bBwq+oq5drNjAuPUdKLZ8FjBDz312dugPmUFy1pSstYx7fPoRvmHQSj
-# JHo+TDCzqGKd/ftiSeIE17mZ0ueZU6cIxLe5MZKYfBXHAUBguJILb4BKrh2YkcbC
-# wjmiKY6N3K3gQPgK9WbnmhyHSDSVssuIT5sLu45xi/AddHSDUXwMYac=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIN0ZDs7umjJ5Ttj7ygUWYsJdrJ23iykNx26J
+# ryQuB8cPMA0GCSqGSIb3DQEBAQUABIIBAKt8kByKhCIrjHYIxRK9fYexYpRjDzWx
+# f+XPaN5dmut3l7yQMVLHQtHlhE//gtimtZydkh4+sGl/23uw+0WABdAoknIc4IbG
+# O64cta1tYGPjc1JfD4w6PxNiAiTjCfvcg+8ubv6wpzt3wKLyHpoo7EpV3Ll9Kn6c
+# n7RaU6jrZbOR6NZWUaRGDr8FsQrQ3c98hM8oivI9BdlVithZiUmgPeotNxjVPEPq
+# LRR/i7ohDQClL9tYQrhka/rD4R6IivAXk3g6n0wAlf5XJMte0jxVh/HqfowPkgtm
+# B+vYawGuvYttPLpG/eDw+jEtpINB2PJzhx1j5J5qnhztsdzg903PnTk=
 # SIG # End signature block

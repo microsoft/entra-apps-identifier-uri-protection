@@ -26,6 +26,9 @@
     -WhatIf=true will run the script in a what-if mode and only log the updated policies `
     without actually updating them in Entra ID. Run with -WhatIf=false to update the policies.
     Default: False
+.PARAMETER Restriction
+    The restriction to disable: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier
+    Default: uriAdditionWithoutUniqueTenantIdentifier
 .EXAMPLE
     DisableIdentifierUriProtection.ps1
     To run the script and log output without updating application management policies
@@ -67,7 +70,12 @@ param(
         without actually updating them in Entra ID. Run with -WhatIf=false to update the policies.
         Default: False"
     )]
-    [bool]$WhatIf = $false
+    [bool]$WhatIf = $false,
+    [Parameter(
+        HelpMessage="The restriction to disable: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("uriAdditionWithoutUniqueTenantIdentifier", "nonDefaultUriAddition")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier"
 )
 
 Write-Host "Script starting. Confirming environment setup..."
@@ -100,37 +108,53 @@ if ($true -eq $Login) {
 }
 
 # Get Tenant Application Management Policy
-$Tenant_Policy = Get-TenantApplicationManagementPolicy
-
-if($null -eq $Tenant_Policy){
-    Write-Error "Unexpected Error: No Tenant AppmanagementPolicy found in tenant. Unable to proceed."
-    if ($true -eq $Logout) {
-        Start-Logout
-    }
-    Exit
+try {
+    $Tenant_Policy = Get-TenantApplicationManagementPolicy
+    Write-Debug "Found 'Tenant' policy"
+} catch {
+    Write-Error "Failed to get Tenant Application Management Policy. Please check your logs for errors and try again."
+    Write-Error "Error: $($_.Exception.Message)"
+    
+    Invoke-Exit $Logout
+    return
 }
-Write-Debug "Found 'Tenant' policy"
 
 # Update Tenant Application Management Policy With new restriction in a disabled state.
-$newPolicy = Set-ApplicationManagementPolicyRestriction_NonDefaultUriAddition -PolicyType "Tenant" -Policy $Tenant_Policy -RestrictForAppsCreatedAfterDateTime $null -WhatIf $WhatIf -State "disabled"
-Update-ApplicationManagementPolicy "Tenant" $newPolicy $WhatIf
+$newPolicy = Set-ApplicationManagementPolicyRestriction_IdentifierUris `
+    -PolicyType "Tenant" `
+    -Policy $Tenant_Policy `
+    -RestrictionTypeName $Restriction `
+    -RestrictForAppsCreatedAfterDateTime $null `
+    -WhatIf $WhatIf `
+    -State "disabled"
 
-if ($true -eq $Logout) {
-    Start-Logout
+# Update the policy
+try {
+    Update-ApplicationManagementPolicy "Tenant" $newPolicy $WhatIf
+} catch {
+    Write-Error "Failed to update Tenant Application Management Policy. Please check your logs for errors and try again."
+    Write-Error "Error: $($_.Exception.Message)"
+    Invoke-Exit $Logout
+    return
 }
 
 if ($true -eq $WhatIf) {
     Write-Warning "What-If mode is ON"
     Write-Warning "The script was run with no -WhatIf parameter or with '-WhatIf `$true`'."
     Write-Warning "Tenant application management policy was not updated in Entra ID."
+
+    Invoke-Exit $Logout
+    return
 }
 
-Write-Message -Message “Identifier URI protection successfully disabled. To re-enable, run ./EnableIdentifierUriProtection.” 
+Write-Message -Message "Identifier URI protection '$Restriction' successfully disabled. To re-enable, run ./EnableIdentifierUriProtection.ps1 with the appropriate restriction."
+
+Invoke-Exit $Logout
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY7sGF3JM8vhT/
-# +qQJ7Bi+BQsGpjYwx5FlSfVYCgjfJ6CCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBy5QZVBTiYnYgG
+# TklS6/b8Rg3Pzh0le/UVJMbsL9fnrKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -151,11 +175,11 @@ Write-Message -Message “Identifier URI protection successfully disabled. To re
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIPUsC9+6tHTAQjdxXzo7neYGxe8O4kT8UdXm
-# T/lETx2mMA0GCSqGSIb3DQEBAQUABIIBAKE+41YF4r6RmbZqnC9PLzVMYvcf60Xf
-# d+5IjovgPT9a8KI/jRAOweLfMlqn/zhPkjpvN1WvH6x3I9PLwwPyLH9WNHwH12wr
-# ++KO2BPP6aJCbFSKJBkTuRc3uP9Rs3SOPqJzB5bAY8nb9YOlIa8K2cSsJBR9XGFV
-# NoM41VweAejupS7lpuLG2HLuTm7jLWH7SnhNmOAeoHchFXFwAJfQqe55zxXcMBPN
-# csjtUmqxMWM4O2LvVkr6W8aWOnR/1sVwKUPnxkF1NHVuQmw0aunxDxFy3nQGTE03
-# 5gjeA3PedDyAo2zi7ZgAYRokwC0e1oaQglp4rzLBEUkHGno/Ck4D+FA=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIDCQNpXFq2+NQ88wl98Iuja1rPUkZa62MiDJ
+# rnT4SizGMA0GCSqGSIb3DQEBAQUABIIBAHqua9hg4vF+NyEmdsBxhhRaVoumAbsC
+# QIE+FHybOREI7b7gDfwoA6qN/ykseD+B4s6g1a6yn+vZHJ4zpm8e7IhgqCoLMf0I
+# b6AQ8vP6924w49Iz3Y73yhuIaGA3aUsvpCHof5JJHwxv9DVgZiXkMsR6L/WYRj2A
+# syiLoFTBVzzEgSZ13Yh00cxIGh6JX75RXRWJPcOZZ/dP1ZblFq7vwGEaVIWVUCRt
+# +TK8LFbuaDE4WqG/ttgAWJr1LAlV1Oj2kZsftX1x2MBjLqjwBEHGJE/HNIbffNqi
+# uGl+jLbEh8+IN4eUFL2clevYpGYOQkQ/VXI6ZrXF+YdAkTVIrYMH2YM=
 # SIG # End signature block

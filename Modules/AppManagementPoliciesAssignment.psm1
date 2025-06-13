@@ -1,79 +1,161 @@
+# Module: AppManagementPoliciesAssignment.psm1
+# Description: This module provides functions to manage app management policy assignments.
+
 [CmdletBinding()]
 param()
 
 Import-Module $PSScriptRoot\EntraIdCommon.psm1 -Force
+Import-Module $PSScriptRoot\AppManagementPolicies.psm1 -Force
 
+<#
+.SYNOPSIS
+Sets the debug preference for the App Management Policy Assignment module.
+
+.DESCRIPTION
+This function sets the debug preference for the current module and propagates the preference to all imported modules.
+
+.PARAMETER DebugPref
+The debug preference to set (e.g., 'Continue', 'SilentlyContinue').
+
+.EXAMPLE
+Set-DebugAppManagementPolicyAssignment -DebugPref 'Continue'
+#>
 function Set-DebugAppManagementPolicyAssignment {
     param (
-        $DebugPref
+        [Parameter(Mandatory = $true)]
+        [string]$DebugPref
     )
 
     $script:DebugPreference = $DebugPref
 
-    # Set Debug pref on all imported modules
+    # Set Debug preference on all imported modules
     Set-DebugEntraIdCommon($DebugPreference)
 }
 
-$API_URI_Policies = "/policies"
-$API_URI_App_Policies = "/appManagementPolicies"
-function Get-CustomAppManagementPolicyReference{
+<#
+.SYNOPSIS
+Constructs the reference URL for a custom app management policy.
+
+.DESCRIPTION
+This function generates the reference URL for a given policy ID by combining the API endpoint with predefined URI segments.
+
+.PARAMETER PolicyId
+The ID of the policy for which the reference URL is to be constructed.
+
+.EXAMPLE
+Get-CustomAppManagementPolicyReference -PolicyId '12345'
+#>
+function Get-CustomAppManagementPolicyReference {
     param(
+        [Parameter(Mandatory = $true)]
         [string]$PolicyId
     )
-    $Policy_URL = (Get-APIEndpoint) + $API_URI_Policies + $API_URI_App_Policies
-    return "$Policy_URL/$PolicyId"
+
+    return (Get-PoliciesUrl) + "/" + $PolicyId
 }
-    
+
+<#
+.SYNOPSIS
+Assigns a new app management policy to an application.
+
+.DESCRIPTION
+This function assigns a specified app management policy to an application. It supports a WhatIf mode for testing.
+
+.PARAMETER AppId
+The ID of the application to which the policy will be assigned.
+
+.PARAMETER Policy
+The policy object to assign to the application.
+
+.PARAMETER WhatIf
+Indicates whether to simulate the operation without making actual changes.
+
+.EXAMPLE
+New-AppManagementPolicyAssignment -Policy $policy -AppId '12345' -WhatIf $true
+#>
 function New-AppManagementPolicyAssignment {
     param(
-        $Policy,
-        $AppId,
-        [bool] $WhatIf = $true
+        [Parameter(Mandatory = $true)]
+        [string]$AppId,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Policy,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$WhatIf = $true
     )
-    $oDataReference = Get-CustomAppManagementPolicyReference $Policy.id
-    $params = @{
-        "@odata.id" = $oDataReference
-    }
 
-    Write-Debug "Assigning the policy to the app."
-    Write-DebugObject $params
-    # Assign the policy to the app
-    if ($WhatIf){
-        New-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -BodyParameter $params -WhatIf
-    } else {
-        $exception = $($result = New-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -BodyParameter $params) 2>&1
-        if ($null -ne $exception) {
-            Write-CreationErrorAndExit -exception $exception -roles "Cloud Application Administrator"
+    try {
+        $oDataReference = Get-CustomAppManagementPolicyReference -PolicyId $Policy.id
+        $params = @{ "@odata.id" = $oDataReference }
+
+        Write-Debug "Preparing to assign the policy to the application."
+        Write-DebugObject $params
+
+        if ($WhatIf) {
+            New-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -BodyParameter $params -ErrorAction Stop -WhatIf
+        } else {
+            New-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -BodyParameter $params -ErrorAction Stop
         }
+
+        Write-Host "Policy ($($Policy.id)) successfully assigned to application ($AppId)."
+    } catch {
+        Write-Error "Error assigning the policy to the application. Details: $_"
+        throw
     }
-
-    Write-Host "Successfully assigned the policy ($($Policy.id)) to the app ($AppId)."
-
-    return $assignedPolicy
 }
 
+<#
+.SYNOPSIS
+Removes an existing app management policy assignment from an application.
+
+.DESCRIPTION
+This function removes a specified app management policy assignment from an application. It supports a WhatIf mode for testing.
+
+.PARAMETER AppId
+The ID of the application from which the policy will be removed.
+
+.PARAMETER PolicyId
+The ID of the policy to remove from the application.
+
+.PARAMETER WhatIf
+Indicates whether to simulate the operation without making actual changes.
+
+.EXAMPLE
+Remove-AppManagementPolicyAssignment -AppId '12345' -PolicyId '67890' -WhatIf $true
+#>
 function Remove-AppManagementPolicyAssignment {
     param(
-        $AppId,
-        $PolicyId,
-        [bool] $WhatIf = $true
+        [Parameter(Mandatory = $true)]
+        [string]$AppId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PolicyId,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$WhatIf = $true
     )
-    Write-Host "Removing the existing policy ($PolicyId) from the app ($AppId)."
-    if ($WhatIf){
-        Remove-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -AppManagementPolicyId $PolicyId -WhatIf
-    } else {
-        $exception = $($result = Remove-MgApplicationAppManagementPolicyByRef -ApplicationId  $AppId -AppManagementPolicyId $PolicyId) 2>&1
-        if ($null -ne $exception) {
-            Write-CreationErrorAndExit -exception $exception -roles "Cloud Application Administrator"
+
+    try {
+        Write-Host "Initiating removal of policy ($PolicyId) from application ($AppId)."
+
+        if ($WhatIf) {
+            Remove-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -AppManagementPolicyId $PolicyId -ErrorAction Stop -WhatIf
+        } else {
+            Remove-MgApplicationAppManagementPolicyByRef -ApplicationId $AppId -AppManagementPolicyId $PolicyId -ErrorAction Stop
         }
+
+        Write-Host "Policy ($PolicyId) successfully removed from application ($AppId)."
+    } catch {
+        Write-Error "Error removing the policy from the application. Details: $_"
+        throw
     }
-    Write-Host "Successfully removed the existing policy ($PolicyId) from the app ($AppId)."
 }
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA2eELqsMUuBstP
-# TygzPMRhXBqiOa7x0ys7pbtmDEJw+qCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCzIS/yptcjGz2q
+# /+Prpiz2EalGFmpfvqpuUJfkeG6HXKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -94,11 +176,11 @@ function Remove-AppManagementPolicyAssignment {
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEICg1QVbT9dqdgqtPqPMZdvyXPqnguzay1oNC
-# kvEa3W3qMA0GCSqGSIb3DQEBAQUABIIBACqqRoq8GDs71oO0thJf7LEhfsj2fLop
-# 5vPMFZT6nJGNzQ5lmTj6MNpPiptofIhzn5exGXPw3bB+hVqeIX3lRnzB35ABk+q5
-# x17DiVgxpmEQK3uQVpKQLjl3p7uRuOYLxgBtuhiPFGIN/0N53GV8z8PgXI+VpCU4
-# KTmRurK0quCJYEdyuQ08YwJziNxh2iI99ZaiIqGoyohPYrNuKrrDb/qjhais21V4
-# MXnpYVvJMlI4rfNQZk4Vk7KTYWQGfYQKgDVVd4KlrWheLT5hvUJMxeQH7gW6vrtP
-# C7JKNqiN6H12ooPdHJaid3wX0Yv/ROIj1qi5SqXu0SFWiyzhQ7Qy/tA=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEICa3xWvRQiWTjdawvd+kNVdkHi4U1kxtF6DZ
+# NI5mrdClMA0GCSqGSIb3DQEBAQUABIIBAEQpcCaec7/uIw22HJIbsQqYqNviwsG6
+# V+k5awdAW+RD3mNxAran484C0/qNSGKgoWePocL43TMrq1uHMSZpwcG2t+QX5A0G
+# F3HfxY0aIxrMX1c+tUS1kCcq7RTR3Jqfa1YGFP8CY48nPgHHnaYKDhDEkh68dHOS
+# YQqv9tSd3G5+3b/ujgNrzySoRIpV4sGvLi9pJOitjS96J0TwpciOMXDc3ogcT+1S
+# wJ/cC963V4QDlbL2+fs7kwpZw5PeINjkxEBKUFan+yirgk/IST5uWybVMm4xdgVO
+# fMR4pgceqv0sIdrkqz2ekIYWeCTDiE2HjUwPmmxOqpsJ2Oprk9fS7pY=
 # SIG # End signature block

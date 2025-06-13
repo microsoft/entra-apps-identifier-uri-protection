@@ -29,12 +29,18 @@
         - Cloud Application Administrator
 .PARAMETER Id
     The User or ServicePrincipal ID to assign the CSA to. Required.
+.PARAMETER Restriction
+    Specifies the type of restriction to manage. Supported values are:
+    - nonDefaultUriAddition
+    - uriAdditionWithoutUniqueTenantIdentifier
+    This parameter is mandatory and determines the restriction to apply.
+    Default: uriAdditionWithoutUniqueTenantIdentifier
 .PARAMETER CustomSecurityAttributeSet 
     The name of the AttributeSet the CustomSecurityAttribute belongs to. If the AttributeSet does not exist a new one will be created.
     Default: MicrosoftDefault
 .PARAMETER CustomSecurityAttributeName
     The name of the CustomSecurityAttribute. If the CustomSecurityAttribute does not exist a new one will be created.
-    Default: MicrosoftDefault
+    Default: Value of the Restriction parameter
 .PARAMETER CustomSecurityAttributeValue
     The string value of the CustomSecurityAttribute to assign. If the CustomSecurityAttribute value does not exist a new one will be created.
     Default: MicrosoftDefault
@@ -93,13 +99,18 @@ param(
     )]
     [string]$Id,
     [Parameter(
+        HelpMessage="Specifies the name of restriction to add exemption to. Supported values are: nonDefaultUriAddition, uriAdditionWithoutUniqueTenantIdentifier. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("nonDefaultUriAddition", "uriAdditionWithoutUniqueTenantIdentifier")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier",
+    [Parameter(
         HelpMessage="The name of the AttributeSet. Default: AppManagementPolicy"
     )]
     [string]$CustomSecurityAttributeSet = "AppManagementPolicy",
     [Parameter(
-        HelpMessage="The name of the existing AttributeSet for the CustomSecurityAttribute. Default: NonDefaultUriAddition"
+        HelpMessage="The name of the existing AttributeSet for the CustomSecurityAttribute. Default: Matches the Restriction parameter value."
     )]
-    [string]$CustomSecurityAttributeName = "NonDefaultUriAddition",
+    [string]$CustomSecurityAttributeName = $Restriction,
     [Parameter(
         HelpMessage="The value of the CustomSecurityAttribute. Default: Exempt"
     )]
@@ -129,8 +140,11 @@ param(
     )]
     [bool]$WhatIf = $false
 )
+
 Write-Host "Script starting. Confirming environment setup..."
+
 Import-Module $PSScriptRoot\Modules\SetCustomSecurityAttribute.psm1 -Force
+
 Set-DebugCustomSecurityAttributes($DebugPreference)
 
 Write-Debug "Checking if Microsoft.Graph module is installed..."
@@ -157,50 +171,70 @@ if ($true -eq $WhatIf) {
     Write-Warning "To update the policy in Entra ID, re-run the script with What-If mode off using param '-WhatIf `$false`'."
 }
 
-# Get the Principal type and ensure the object exists.
-$principalType = Invoke-GetPrincipalType -PrincipalId $Id
+try {
+    # Get the Principal type and ensure the object exists.
+    $principalType = Invoke-GetPrincipalType -PrincipalId $Id
 
-if ($null -eq $principalType) {
-    Write-Debug "Unable to find principal object in tenant. Exiting."
-    Write-Error "Principal $Id not found in tenant $TenantId. Unable to assign CustomSecurityAttribute to non-existent principal."
-    if ($true -eq $Logout) {
-        Start-Logout
+    if ($null -eq $principalType) {
+        Write-Error "Principal '$Id' not found in tenant '$TenantId'. Unable to assign CustomSecurityAttribute to non-existent principal."
+
+        Invoke-Exit $Logout
+        return
     }
-    Exit
-}
 
-# Create AttributeSet, CSA, and CSAExemption on the defaultTenantPolicy if they do not exist
-Invoke-EnsureCustomSecurityAttributeObjects -attributeSetName $CustomSecurityAttributeSet  `
-                                            -csaName $CustomSecurityAttributeName `
-                                            -csaValue $CustomSecurityAttributeValue `
-                                            -whatIf $WhatIf
+    $CustomSecurityAttributeSet = Set-CustomSecurityAttributeStringLength `
+        -customSecurityAttributeStr $CustomSecurityAttributeSet `
+        -strName "CustomSecurityAttributeSet"
 
-Write-Debug "All objects created successfully. Assigning CSA to Principal."
+    $CustomSecurityAttributeName = Set-CustomSecurityAttributeStringLength `
+        -customSecurityAttributeStr $CustomSecurityAttributeName `
+        -strName "CustomSecurityAttributeName"
 
-# Assign the CSA to the Principal
-Add-CSAToPrincipal -attributeSetName $CustomSecurityAttributeSet  `
-                   -csaName $CustomSecurityAttributeName `
-                   -csaValue $CustomSecurityAttributeValue `
-                   -principalId $Id `
-                   -principalType $principalType `
-                   -whatIf $WhatIf
+    Write-Debug "Ensuring Custom Security Attribute objects exist."
 
-if ($true -eq $Logout) {
-    Start-Logout
+    Invoke-CheckAndAddCustomSecurityAttributeExemption `
+        -attributeSetName $CustomSecurityAttributeSet `
+        -csaName $CustomSecurityAttributeName `
+        -csaValue $CustomSecurityAttributeValue `
+        -RestrictionTypeName $Restriction `
+        -whatIf $WhatIf
+
+    Write-Debug "Assigning Custom Security Attribute to Principal."
+
+    Add-CSAToPrincipal `
+        -attributeSetName $CustomSecurityAttributeSet `
+        -csaName $CustomSecurityAttributeName `
+        -csaValue $CustomSecurityAttributeValue `
+        -principalId $Id `
+        -principalType $principalType `
+        -whatIf $WhatIf
+
+} catch {
+    Write-Error "An error occurred while processing the caller exemption."
+    Write-Error "Error details: $($_.Exception.Message)"
+
+    Invoke-Exit $Logout
+    return
 }
 
 if ($true -eq $WhatIf) {
     Write-Warning "What-If mode is ON"
-    Write-Warning "The script was run with no -WhatIf parameter or with '-WhatIf `$true`'."
-    Write-Warning "Tenant application management policy was not updated in Entra ID."
+    Write-Warning "The script was run with '-WhatIf `$true`'."
+    Write-Warning "The caller principal with ID '$Id' was not granted an exemption in Entra ID."
+
+    Invoke-Exit $Logout
+    return
 }
 
-Write-Message -Message “Exemption successfully granted. Principal with ID {$Id} can now add custom identifier URIs to Entra applications.”
+Write-Message "Exemption from restriction '$Restriction' successfully granted. Principal with ID {$Id} can now add custom identifier URIs to Entra applications."
+
+Invoke-Exit $Logout
+
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAdly9EiSJYGNQV
-# gBJXI7iRUw+Ch6NVceP+6J6Q0bBL+aCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBHDi3Im50vDEOv
+# gWGv+hBq9fp+U2qr2IupSoUSJQBP3KCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -221,11 +255,11 @@ Write-Message -Message “Exemption successfully granted. Principal with ID {$Id
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIPUy8sNwAkjc0AAvFXCSjr9u/fSHaDja7lV7
-# TOskx8GLMA0GCSqGSIb3DQEBAQUABIIBAHpIyj5RVwhGsLBILWEVbnU/SxnKTYN9
-# QQsTlcaO12iSYR3vQZTK6HbcCDSFfqYA0s4JGNXroALJ/G+MpDf/MVXy/Z55sT20
-# WrQMcy8dD/LBLKirVnCGOmSOd2C3CzuiiLqlFRYJ2okDqwWs5iahfz6VB9TPVugA
-# A3fvy5Zf+LuPgYJNm2HKIK5Ir1i8ReXwZNQvoi8Ap5dqCi9RbUc9SpHk6c6RXGfT
-# EhZss3wmFuxM94CHGk9BlmVvKJcArYJaMuL+RqVaWiGaY+txWuD/KhEO4P8m+Uqc
-# HTudnaEXu61xF6QwrwrnD5zdjaxT6NgK+qjO0wGdTHoga1fki+H9Ps4=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIDZ447K7Mtq/By+bLp2Yu/MertoGsBK4aXLW
+# Sb8y+73YMA0GCSqGSIb3DQEBAQUABIIBAHwZg91v7QkRRRaNGyW4fESvmHhQ2qBV
+# f/dJkbiF6EIPSJA+lKWn7rJ94YYddoF4WbGyVdOKs4uyUdBiqnN5ioH8f25ilOvs
+# Qh3GMrZV10seQvlcyRDA1vuv7ByqPx53PDO6Iw0FEKFFt6D7wTQOj0IXsoE4Jt/k
+# JQMFMGIyaRcZkRMDh61uQtJxRqh9FK7MXqZZykx3b34tAbIDmKCLuJZi8aAIp/Tv
+# 5m7bv0QblCUN/kwnezYH7PZ5SzyJ+Esz1sHD+068zESjHHDMA/Cyw7V/nE4bAzuI
+# 0hkYqv1xlfcIMu9VbWyavWskFdisO80Wdnz7TTaZ4DQrJJ7tDc+aEq4=
 # SIG # End signature block

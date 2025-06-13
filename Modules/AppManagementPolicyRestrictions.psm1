@@ -3,12 +3,6 @@ param()
 
 Import-Module $PSScriptRoot\AppManagementPolicies.psm1 -Force
 
-enum RestrictionState {
-    none
-    enabled
-    disabled
-}
-
 function Set-DebugAppManagementPolicyRestrictions {
     param (
         $DebugPref
@@ -23,19 +17,15 @@ function Set-DebugAppManagementPolicyRestrictions {
 
 function New-RestrictionType {
     param (
+        [ValidateSet("enabled", "disabled")]
+        $State,
         $RestrictionTypeName = $null,
-        $State = "enabled",
         $RestrictForAppsCreatedAfterDateTime = $null,
         $OtherProps = $null
     )
 
-
-    if (-not ([RestrictionState].GetEnumNames() -contains $State)) {
-        throw "Invalid value for State parameter: $State. Please provide a valid value: enabled, disabled, none."
-    }
-
     $RestrictionType = @{
-        state = [RestrictionState].GetEnumName([RestrictionState]$State)
+        state = $State
     }
 
     if ([string] $RestrictForAppsCreatedAfterDateTime -as [DateTime]) {
@@ -296,7 +286,7 @@ function Set-Restriction_ApplicationManagementPolicy {
     # Restriction Names for this App Restrictions to set
     $RestrictionsNames = $AppRestrictionsNames.$AppRestrictionsNameToSet
 
-    # Existing App Restrinctions
+    # Existing App Restrictions
     if ($PolicyType -eq "Custom") {
         $AppRestrictionsExisting = $Policy.restrictions.$AppRestrictionsNameToSet
     } else {
@@ -305,7 +295,7 @@ function Set-Restriction_ApplicationManagementPolicy {
 
     # New App Restrictions
     $AppRestrictionsToSet = $PolicyRestrictionNestedObjectToSet.$AppRestrictionsNameToSet
-    
+
     if ($PolicyType -eq "Custom") {
         $Policy.restrictions.$AppRestrictionsNameToSet = Set-Restriction_AppRestrictions $PolicyType $AppRestrictionsNameToSet $RestrictionsNames $AppRestrictionsExisting $AppRestrictionsToSet
     } else {
@@ -324,47 +314,56 @@ function Set-ApplicationManagementPolicyRestriction {
     )
 
     if ($null -eq $RestrictionTypeName) {
-        Write-Error "Cannot set null restriction on '" $PolicyType "' Policy"
+        throw "Cannot set null restriction on '$PolicyType' Policy"
     }
 
-    Write-Host ("Setting restriction '" + $RestrictionTypeName + "' on '" + $PolicyType + "' policy")
+    Write-Host ("Setting restriction '$RestrictionTypeName' on '$PolicyType' policy")
 
     $Policy = Set-Restriction_ApplicationManagementPolicy $PolicyType $Policy $PolicyRestrictionNestedObjectToSet
     return $Policy
 }
 
-function Set-ApplicationManagementPolicyRestriction_NonDefaultUriAddition {
+function Set-ApplicationManagementPolicyRestriction_IdentifierUris {
     param (
         $PolicyType,
         $Policy,
+        $RestrictionTypeName = "uriAdditionWithoutUniqueTenantIdentifier",
         $RestrictForAppsCreatedAfterDateTime = $null,
         $State = "enabled",
         $WhatIf = $true
     )
 
-    $RestrictionTypeName = "nonDefaultUriAddition"
+    $RestrictionTypeObject = New-RestrictionType `
+        -State $State `
+        -RestrictForAppsCreatedAfterDateTime $RestrictForAppsCreatedAfterDateTime `
+        -OtherProps @{
+            "excludeAppsReceivingV2Tokens" = $true
+            "excludeSaml" = $true
+        }
 
-    $RestrictionTypeObject = New-RestrictionType -RestrictForAppsCreatedAfterDateTime $RestrictForAppsCreatedAfterDateTime -State $State -OtherProps @{
-        "excludeAppsReceivingV2Tokens" = $true
-        "excludeSaml" = $true
-    }
     $PolicyRestrictionNestedObjectToSet = @{
         "applicationRestrictions" = @{
             "identifierUris" = @{
-                "nonDefaultUriAddition" = $RestrictionTypeObject
+                $RestrictionTypeName = $RestrictionTypeObject
             }
         }
     }
 
-    $Policy = Set-ApplicationManagementPolicyRestriction $PolicyType $Policy $RestrictionTypeName $PolicyRestrictionNestedObjectToSet $WhatIf
+    $Policy = Set-ApplicationManagementPolicyRestriction `
+        -PolicyType $PolicyType `
+        -Policy $Policy `
+        -RestrictionTypeName $RestrictionTypeName `
+        -PolicyRestrictionNestedObjectToSet $PolicyRestrictionNestedObjectToSet `
+        -WhatIf $WhatIf
+        
     return $Policy
 }
 
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmFOjWxBziLM4E
-# dMyfjrtF69Y+7WVbeio1/C1C37eZZaCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBtxLhTVdFBitJ0
+# 68Ejm1QnFTrjkn4CWI0Qf8sH61RdYKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -385,11 +384,11 @@ function Set-ApplicationManagementPolicyRestriction_NonDefaultUriAddition {
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIK+FmItlH7fYoaIv/ayAiweMuQ/BRzUhLtpH
-# 4k0XW8QiMA0GCSqGSIb3DQEBAQUABIIBACB7hDw6Mlz2AhhNcfk0CKJ1ehNgFjOc
-# aNbaJRd7aXXJxrgV1P3r2mepNXJjdHyRRWhPF8vKtgJgb/5FKYQWqLx3XZx6VN6/
-# N8FBapQ+xnBoPp4z3UaVQtv9KvbMnN9nDe8unSko/1hPijbBe6tiYS1L7AkiLdMO
-# kqLQZnqsbNCaqAS9SiSPRuxnWZJi6KJd5XZp3Zid5zPNrrXShaEG34vrkbg+Ki8W
-# j4FS0pUruZqV3WkIuQrgkfEzXMoZ+qTXYfgrcKWiPOP+5fkc/e+kOKmUWXa6QqSj
-# z/AzORgH+eHp27Ve7zVqOH1ONuPTd9C4lHsc57M07H61E+vqGb8KzhU=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIDAi7weeJKkJSiSLz/RCinPL3kTcLn+8IQZ/
+# WLKgVm0jMA0GCSqGSIb3DQEBAQUABIIBAG6AAIR21JBfsVYt+yZdUp7zk8w0BSYe
+# aaSvcHMe3MZt+kDtAzpVb6+AC+csI4P9ADcxqpRThY5IeW4NpADB24zBp+ZVF6i5
+# ZDRWqckucGL/2XhZTsSs0VKJjCEZ9pnGUB4aM/XPX7QbOC5o0elVyayCOJZBzYnJ
+# QXypZPDn5Uvl1bt7BpOkrTHkndSKV1IjrQSZgnXKoHUiaYZ/jS0yHhM2fbYxCS4T
+# 2BDcThoVX0A23xPvoBZAXNQMrB/x8M8EhhggGotN8K6k0wRYJxfzU3B3ld4eJrv0
+# stw96yMezrAaDVpNNHj/JaeEN/Rm7izNT2ucSDzvY0VRlBulT1oh8Ws=
 # SIG # End signature block

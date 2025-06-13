@@ -21,6 +21,7 @@ $ApplicationRestrictionsCommon = @{
 }
 
 $IdentifierUris = @{
+    "uriAdditionWithoutUniqueTenantIdentifier" = @{}
     "nonDefaultUriAddition" = @{}
 }
 
@@ -49,6 +50,10 @@ $CustomPolicyRestrictions = $ApplicationRestrictionsCommon + @{
         "identifierUris" = $IdentifierUris
         "audiences" = $Audiences
     }
+}
+
+function Get-PoliciesUrl {
+    return (Get-APIEndpoint) + $API_URI_Policies + $API_URI_App_Policies
 }
 
 function Get-RestrictionNames {
@@ -284,9 +289,14 @@ function Invoke-ScrubPolicyForPatch {
     # Existing ExcludeActors objects contain an odataContext type in the GET which is disallowed in the patch. Remove it.
     # Audiences is a new property that is only allowed for certain tenants. Remove it if it is not present.
     if("Tenant" -eq $PolicyType) {
-        $Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition = Invoke-ScrubExcludeActors $Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition
+        $Policy.applicationRestrictions.identifierUris.uriAdditionWithoutUniqueTenantIdentifier =
+            Invoke-ScrubExcludeActors $Policy.applicationRestrictions.identifierUris.uriAdditionWithoutUniqueTenantIdentifier
+        $Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition =
+            Invoke-ScrubExcludeActors $Policy.applicationRestrictions.identifierUris.nonDefaultUriAddition
+
         $Policy.applicationRestrictions = Invoke-ScrubKeyCredentials $Policy.applicationRestrictions
         $Policy.applicationRestrictions = Invoke-ScrubPasswordCredentials $Policy.applicationRestrictions
+
         $Policy.servicePrincipalRestrictions = Invoke-ScrubKeyCredentials $Policy.servicePrincipalRestrictions
         $Policy.servicePrincipalRestrictions = Invoke-ScrubPasswordCredentials $Policy.servicePrincipalRestrictions
 
@@ -300,15 +310,21 @@ function Invoke-ScrubPolicyForPatch {
 
             $Policy.applicationRestrictions = $appRestrictions
         } else {
-            $Policy.applicationRestrictions.audiences.azureAdMultipleOrgs = Invoke-ScrubExcludeActors $Policy.applicationRestrictions.audiences.azureAdMultipleOrgs
-            $Policy.applicationRestrictions.audiences.personalMicrosoftAccount = Invoke-ScrubExcludeActors $Policy.applicationRestrictions.audiences.personalMicrosoftAccount
+            $Policy.applicationRestrictions.audiences.azureAdMultipleOrgs =
+                Invoke-ScrubExcludeActors $Policy.applicationRestrictions.audiences.azureAdMultipleOrgs
+            $Policy.applicationRestrictions.audiences.personalMicrosoftAccount =
+                Invoke-ScrubExcludeActors $Policy.applicationRestrictions.audiences.personalMicrosoftAccount
         }
     } else {
         $Policy.restrictions = Invoke-ScrubKeyCredentials $Policy.restrictions
         $Policy.restrictions = Invoke-ScrubPasswordCredentials $Policy.restrictions
 
         if ($null -ne $Policy.restrictions.applicationRestrictions){
-            $Policy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition = Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition
+            $Policy.restrictions.applicationRestrictions.identifierUris.uriAdditionWithoutUniqueTenantIdentifier =
+                Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.identifierUris.uriAdditionWithoutUniqueTenantIdentifier
+
+            $Policy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition =
+                Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition
 
             if ($null -eq $Policy.restrictions.applicationRestrictions.audiences){
                 $appRestrictions = $Policy.restrictions.applicationRestrictions
@@ -319,8 +335,10 @@ function Invoke-ScrubPolicyForPatch {
                 }
                 $Policy.restrictions.applicationRestrictions = $appRestrictions
             } else {
-                $Policy.restrictions.applicationRestrictions.audiences.azureAdMultipleOrgs = Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.audiences.azureAdMultipleOrgs
-                $Policy.restrictions.applicationRestrictions.audiences.personalMicrosoftAccount = Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.audiences.personalMicrosoftAccount
+                $Policy.restrictions.applicationRestrictions.audiences.azureAdMultipleOrgs =
+                    Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.audiences.azureAdMultipleOrgs
+                $Policy.restrictions.applicationRestrictions.audiences.personalMicrosoftAccount =
+                    Invoke-ScrubExcludeActors $Policy.restrictions.applicationRestrictions.audiences.personalMicrosoftAccount
             }
         }
     }
@@ -379,8 +397,8 @@ function Invoke-ScrubPasswordCredentials {
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcS5UMGYbOxEQ6
-# P2kc+bX5R5tCs5qhCBYfxLOOLcocZqCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMvunELDiHrPz/
+# yWZry4MIoY6t0C+gAG+vMk6EM+yYS6CCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -401,11 +419,11 @@ function Invoke-ScrubPasswordCredentials {
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIEULY+HlZ3xw83N0BhhIrAO3Y8yh293EWPVn
-# uQ/4gUELMA0GCSqGSIb3DQEBAQUABIIBAEk/YI7R/WDbvDAuRL9k9WJgWHc5C+N2
-# sGI7Xb/qMzDGzswWMTe9vBBoUhRO7TrFEXWpwqzlGKecAGfqmlWOrUiqIrzeyy9j
-# 5Ypq04dCOdMU0hleKgOVZEoReVMttO28cpMqxbNfM5SDoV7uCj23SaO/3+MF4NnC
-# KVNkCGt3DsxzNV1dvN5Tl77OVD1OYOI15x6wUiqkhqjjCIVdCCY7JdWoUCTCHX7A
-# q9L0acKJlK7WiZreb82XFLwrDC2bsKwQz0eOZoj6vFYzoDEyzrN6AE9CHwce8m6x
-# U+sgionsIUutDT0ocwIPZGZZIHO6C+xoLclkI1X8gILpW0QwMh/By/0=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIAOqHltEnDoZRtF8ygk/i4xz6snmWUv7Aw4L
+# Ps0rzln8MA0GCSqGSIb3DQEBAQUABIIBAIYyQBBgGzDLWsSJpdTqsq7ygzKVNgZW
+# 64auyhOFzfzQ3FS/5ZuGszRE8mDM9QgWsdR55oLxwfNOJjDRyGGsEfJq2gZLfvml
+# 6lrGfzQKLBrrpXc6MY2lm6gccPAO0FdushA9a8c8H8yknUmslL37XmFHh+lFRliF
+# 9GLfhkMXxkmU4O85hnmaHSsgRL3AmeTVvCH8z1Ylzmvw7fC4kxG5OOcRtnQnjFa7
+# qjLDcLV8MJ6vFqMyCIo4trFjqUSkKhoIGW5opouxdj/MpV6pSoIPeMsdj4KnWcuB
+# Ldxqd2cWQYMoJn4HpkXU3VE76q5TgEX+8GJ+LcHoq0v+woqDwGIDVJ8=
 # SIG # End signature block

@@ -121,6 +121,16 @@ function Set-ExecutionEnvironment {
     param (
         $Environment
     )
+    
+    if ("PPE" -eq $Environment) {
+        # Add PPE environment for testing.
+        # This is a test environment and should not be used in production
+        Add-MgEnvironment `
+            -GraphEndpoint "https://graph.microsoft-ppe.com" `
+            -AzureADEndpoint "https://login.windows-ppe.net" `
+            -Name "PPE" > $null
+    }
+        
     # set env for current session
     $script:Current_Environment = $Environment
 }
@@ -133,7 +143,30 @@ function Start-Login {
 
     Write-Message -Color "Yellow" -Message "Login screen opened. Please use your browser to sign in with an administrator account."
 
-    Write-Debug "Connecting to MS Graph using params: `
+    Write-Host "Connecting to MS Graph $script:Current_Environment environment"
+
+    if ("PPE" -eq $script:Current_Environment) {
+        # Test Public Client MTA App in PPE tenant
+        $ClientId = "cd5ce02a-84a9-4f6f-9e35-15bfcbfad7b0"
+    
+        Write-Debug "Connecting using params: `
+            -NoWelcome `
+            -Scopes `"$RequiredScopes`" `
+            -Environment $script:Current_Environment `
+            -TenantId $TenantId `
+            -ClientId $ClientId"
+
+        Connect-MgGraph `
+            -NoWelcome `
+            -Scopes $RequiredScopes `
+            -Environment $script:Current_Environment `
+            -TenantId $TenantId `
+            -ClientId $ClientId
+
+        return
+    }
+
+    Write-Debug "Connecting using params: `
         -NoWelcome `
         -Scopes `"$RequiredScopes`" `
         -Environment $script:Current_Environment `
@@ -148,6 +181,16 @@ function Start-Login {
 
 function Start-Logout {
     $temp = Disconnect-MgGraph
+}
+
+function Invoke-Exit {
+    param (
+        [bool]$Logout = $true
+    )
+
+    if ($true -eq $Logout) {
+        Start-Logout
+    }
 }
 
 function Get-APIEndpoint {
@@ -206,11 +249,12 @@ function Write-Message {
     )
     Write-Host -ForegroundColor $Color $Message
 }
+
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgGRZnIvm6Icas
-# /AEL3Qr+phYmvjzvyBJ2yfdq47fov6CCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA+N6Qfi2xR/euK
+# F1++s+mKjnGfVPlBHNeNksTtymSC5qCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -231,11 +275,11 @@ function Write-Message {
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIH67bt9LJoZsiiA9UthNMwmz7pIVUrXN48J7
-# +KpmpDouMA0GCSqGSIb3DQEBAQUABIIBAIFdJRIfDVRTDOlEYkogSBNvXACoMgk2
-# RfN3XGLwttff+L7U1hqoe9BAQnOdvrYkRNooo1W4gF4qMHJzv6nqAR1a5U3FvhAv
-# fCSSvRwnWKHRYIzqBjBVREJryuOgJztFq/SS3Vxv+wqEwbZxAXMSVEFjNzbarIrr
-# Q/Nl/xpoxOyPUIYAtgcImxTunNmqOndeglg1/WOp29zPAGxkN6fbIjjRBZG802Qr
-# llMrktjGf4lXK7skisMWVmZ+Rc+y8+N3yRTLP665wtK9FJv8fxkDiC/RYNuvUAXR
-# Xj94OWhdB8AhTX5pEf+a3MVQcKlAxPQgd/idS6YbRMRrzXBUOslPZCY=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIIm5kEO2/f56hbz2oSVAIzP8VDZPuLOQe7kO
+# OUyer5uAMA0GCSqGSIb3DQEBAQUABIIBABIEWYXxV9kuInFj0WNr99ye8b8RmlVN
+# wSjwj8YjieasRBiNCM7xVTJtYtgqFfSO1KRtcuwisBvprSPrKfVe68rZuwdl5h7G
+# lw4BCimy0t0lpbUBQqPxXarZozIRoCtK+O3lfwrVQ8gXtFf+IzmX2QBxX3zSxmJG
+# AcD1kyhJ2RF3+FZ77DnKVmZm6b30yDRcSG2znOM5RTMNezlCW6Fj3jKOEvsmuro4
+# 8RfmKREGMlc+kyYuevfK+iM79VPYbuoY3kAA9I0dFjBUggwPRPVTj259NOphOmZA
+# 9tblBtF0h2YhUt5veXr5Y+oXsMjFiLb9ZnvHLIM6bAUbJfYuZUyDCvI=
 # SIG # End signature block
