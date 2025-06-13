@@ -42,6 +42,8 @@
     -WhatIf=true will run the script in a what-if mode and only log the updated policies `
     without actually updating them in Entra ID. Run with -WhatIf=false to update the policies.
     Default: False
+.PARAMETER Restriction
+    The restriction to enable: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier
 .EXAMPLE
     RemoveAppExemption.ps1 -AppId "12345678-1234-1234-1234-123456789012" -WhatIf $true
     To run the script and review the log output without updating any objects in the tenant. Used to verify the script actions before committing the changes to the tenant.
@@ -94,7 +96,12 @@ param(
         HelpMessage="-WhatIf=true will run the script in a what-if mode and only log the updated policies `
         without actually updating them in Entra ID. Run with -WhatIf=false to update the policies. Default: False"
     )]
-    [bool]$WhatIf = $false
+    [bool]$WhatIf = $false,
+    [Parameter(
+        HelpMessage="The restriction to enable: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("uriAdditionWithoutUniqueTenantIdentifier", "nonDefaultUriAddition")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier"
 )
 Write-Host "Script starting. Confirming environment setup..."
 Import-Module $PSScriptRoot\Modules\SetPolicyOnApp.psm1 -Force
@@ -126,53 +133,64 @@ if ($true -eq $WhatIf) {
     Write-Warning "The script will not update the tenant application management policy in Entra ID but will log the updated policy."
     Write-Warning "To update the policy in Entra ID, re-run the script with What-If mode off using param '-WhatIf `$false`'."
 }
+
 $defaultDisabledPolicyName = "Identifier URI addition exemption"
 $application = Get-AppByAppId -AppId $AppId
 $appObjId = $application.id
 
-# Get the existing policy for the App or the tenant policy if none exist.
-$existingPolicy = Get-AppManagementPolicyForApp -AppId $appObjId
-if ($null -eq $existingPolicy){
-    Write-Message "The application does not have any custom app management policy assigned. No further action is required."
-    if ($true -eq $Logout) {
-        Start-Logout
-    }
-    Exit
-} else {
-    if("enabled" -eq $existingPolicy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition.state){
-        Write-Message "The application is already enrolled in the NonDefaultUriAddition restriction. No further action is required."
-        if ($true -eq $Logout) {
-            Start-Logout
-        }
-        Exit
-    }
-}
+try {
+    # Get the existing policy for the App or the tenant policy if none exist.
+    $existingPolicy = Get-AppManagementPolicyForApp -AppId $appObjId
 
-# App is assigned to default policy. Simply unassign.
-if ($defaultDisabledPolicyName -eq $existingPolicy.displayName) {
-    Remove-AppManagementPolicyAssignment -AppId $appObjId -PolicyId $existingPolicy.id -WhatIf $WhatIf
-} else {
-    # App was assigned a different custom policy. Update to enable the nondDefaultUriAddition restriction.
-    $existingPolicy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition.state = "enabled"
-    Update-ApplicationManagementPolicy -PolicyType "Custom" -Policy $existingPolicy -WhatIf $WhatIf
-}
+    if ($null -eq $existingPolicy) {
+        Write-Message "The application does not have any custom app management policy assigned. No further action is required."
 
-if ($true -eq $Logout) {
-    Start-Logout
+        Invoke-Exit $Logout
+        return
+    }
+
+    $RestrictionObj = $existingPolicy.restrictions.applicationRestrictions.identifierUris.$Restriction
+
+    if ("enabled" -eq $RestrictionObj.state) {
+        Write-Message "The application is already enrolled in the '$Restriction' restriction. No further action is required."
+        
+        Invoke-Exit $Logout
+        return
+    }
+
+    # App is assigned to default policy. Simply unassign.
+    if ($defaultDisabledPolicyName -eq $existingPolicy.displayName) {
+        Remove-AppManagementPolicyAssignment -AppId $appObjId -PolicyId $existingPolicy.id -WhatIf $WhatIf
+    } else {
+        # App was assigned a different custom policy. Update to enable the specified restriction.
+        $RestrictionObj.state = "enabled"
+        Update-ApplicationManagementPolicy -PolicyType "Custom" -Policy $existingPolicy -WhatIf $WhatIf
+    }
+} catch {
+    Write-Error "An error occurred while processing the application exemption removal."
+    Write-Error "Error details: $($_.Exception.Message)"
+
+    Invoke-Exit $Logout
+    return
 }
 
 if ($true -eq $WhatIf) {
     Write-Warning "What-If mode is ON"
     Write-Warning "The script was run with no -WhatIf parameter or with '-WhatIf `$true`'."
-    Write-Warning "The application was not granted an exemption in Entra ID."
+    Write-Warning "The application with app Id '$AppId' was not granted an exemption in Entra ID."
+
+    Invoke-Exit $Logout
+    return
 }
 
-Write-Message "Exemption successfully removed from app with app ID {$AppId}. This application can no longer have custom identifier URIs added to it.”
+Write-Message "Exemption from restriction '$Restriction' successfully removed from application with app Id '$AppId'. This application can no longer have custom identifier URIs added to it."
+
+Invoke-Exit $Logout
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB/siynbW4hRTH9
-# RtGUgMLHOc28LmVixbIIo7opnC7icaCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5UToScMkA7Z6G
+# w/cf2AmYiw6+Prm7Vr0URsQlXNY4MKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -193,11 +211,11 @@ Write-Message "Exemption successfully removed from app with app ID {$AppId}. Thi
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIBIFra9U5jWlfmKqxwRuIkVkatUvDTbA8jo3
-# EY/3/KKgMA0GCSqGSIb3DQEBAQUABIIBAEd+mISdHgLHRg84FPchjw2DOzj0McJm
-# eSSIVpefZFCwp+PBCikqSvprkkk8NdYanVeHGvsnvaRV+ZeGyG87jSkE5ByASZyW
-# GWsOxIRZTx67243iMeOoiAaSO4hPfuJGl0euTkakaMporwhibJSFLxQL8xvcrQk/
-# 8V7hKQWoRpWli3jbMlwuEpnJG7Rq5tnE03yoKLcU8i1e4zza9xdYSJZFi98pnFqo
-# JtZbckjfrXY7p35aQOI6Z7Ymqa5i0dbwk/PnXmmUQfvOoNGnMeyUsF3795p4YxHV
-# aQVjmRBE5E8anXKa6Ur1hIQtq+I4cwIv92Hk9S+yK3bj1e3D5JgEpCA=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIMgZgDFgU0b+ZqM1F6KiTitajByBf2GsN/xd
+# aprC54+PMA0GCSqGSIb3DQEBAQUABIIBAA7oab8wPryY9Sv5yBQcI7rF1Wf3cngt
+# AkrWxnW5G6wpqAnic7ufkpoDXnRSGP9KV24nQoRFfRyEPvnEpVQugyuUJuxw1MBN
+# 7ebsWWKA4V+s0l9bXs08GJK78Z5U+UPkK23wgH0ATzjx1x5U9TkKWZ0+w7iXw1go
+# iVrjuu6Cslr13LT3zqDmHEjgQoTuuABNJWy4GD0sDQrOPWfMocb9aMtF9WlOkpqY
+# wraVxohtEyGPNBfeXkUt4DDdZfSf5VGB4aAgrfn3N0B4QspfbawDKB5emnEnsDYE
+# QzyHTi3XJw4HPaXBoNnkX41+eYskw/qXYQBjHDW+kwC20nnApkWlzjc=
 # SIG # End signature block

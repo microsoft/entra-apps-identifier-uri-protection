@@ -55,30 +55,37 @@
     -WhatIf=true will run the script in a what-if mode and only log the updated policies `
     without actually updating them in Entra ID. Run with -WhatIf=false to update the policies.
     Default: False
+.PARAMETER Restriction
+    The restriction under identifierUris where the CSA exemption will be removed. Valid values are "uriAdditionWithoutUniqueTenantIdentifier" and "nonDefaultUriAddition".
 .EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -WhatIf $true
-    To run the script and review the log output without updating any objects in the tenant. Used to verify the script actions before committing the changes to the tenant.
-.EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -WhatIf $false
-    To run the script and assign the default exempt CustomSecurityAttribute to the User or ServicePrincipal. This will also create a default AttributeSet and CustomSecurityAttribute if they do not exist.
-.EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -TenantId "961581b0-b5e9-4872-a9cf-83a2a9f975ab"
-    To login to the specified tenant. This is used if the user has multiple tenants and needs to specify which tenant to run the script against. Cannot be used with -Login $false as this flag overrides the -TenantId functionality.
-.EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -CustomSecurityAttributeSet "MyAttributeSet" -CustomSecurityAttributeName "MyCustomSecurityAttribute" -CustomSecurityAttributeValue "MyExistingValue"
-    To run the script and assign the specified CustomSecurityAttribute to the principal. If the CustomSecurityAttribute does not exist, it will be created. The CustomSecurityAttributeValue must be of type 'String'.
-.EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -Debug
-    To run the script and view the detailed debug output. Used for troubleshooting any errors.
-.EXAMPLE
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -WhatIf $true -Logout $false
+RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -Restriction "nonDefaultUriAddition" -WhatIf $true
+This example runs the script in What-If mode to simulate the removal of the CSA exemption for the specified principal under the "nonDefaultUriAddition" restriction.
 
-    RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -WhatIf $false -Login $false
+.EXAMPLE
+RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -Restriction "uriAdditionWithoutUniqueTenantIdentifier" -WhatIf $false
+This example removes the CSA exemption for the specified principal under the "uriAdditionWithoutUniqueTenantIdentifier" restriction and updates the tenant policy.
 
-    To run the script in both -WhatIf modes without repeating the login flow.
-.NOTES
-    Author: Zachary Allison
-    Date:   12 Nov 2024
+.EXAMPLE
+RemoveCallerExemption.ps1 -Id "12345678-1234-1234-1234-123456789012" -CustomSecurityAttributeSet "MyAttributeSet" -CustomSecurityAttributeName "MyCustomSecurityAttribute" -CustomSecurityAttributeValue "MyValue" -Restriction "nonDefaultUriAddition" -WhatIf $true
+This example simulates the removal of a CSA exemption with custom attribute set, name, and value under the "nonDefaultUriAddition" restriction.
+
+.EXAMPLE
+    # Example 1: Remove exemption for a ServicePrincipal
+    Remove-CallerExemption -Id "12345678-1234-1234-1234-123456789abc" -Restriction "nonDefaultUriAddition"
+    
+    # This command removes the exemption for the ServicePrincipal with ID "12345678-1234-1234-1234-123456789abc" under the "nonDefaultUriAddition" restriction.
+
+.EXAMPLE
+    # Example 2: Remove exemption for a User with WhatIf mode enabled
+    Remove-CallerExemption -Id "87654321-4321-4321-4321-cba987654321" -Restriction "uriAdditionWithoutUniqueTenantIdentifier" -WhatIf $true
+
+    # This command simulates the removal of the exemption for the User with ID "87654321-4321-4321-4321-cba987654321" under the "uriAdditionWithoutUniqueTenantIdentifier" restriction without making actual changes.
+
+.EXAMPLE
+    # Example 3: Remove exemption with custom TenantId and environment
+    Remove-CallerExemption -Id "11223344-5566-7788-99aa-bbccddeeff00" -Restriction "nonDefaultUriAddition" -TenantId "mytenant.onmicrosoft.com" -Environment "USGovernment"
+
+    # This command removes the exemption for the principal with ID "11223344-5566-7788-99aa-bbccddeeff00" under the "nonDefaultUriAddition" restriction in the specified tenant and environment.
 #>
 [CmdletBinding()]
 param(
@@ -88,13 +95,18 @@ param(
     )]
     [string]$Id,
     [Parameter(
+        HelpMessage="Specifies the type of restriction to remove exemption from. Supported values are: nonDefaultUriAddition, uriAdditionWithoutUniqueTenantIdentifier. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("nonDefaultUriAddition", "uriAdditionWithoutUniqueTenantIdentifier")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier",
+    [Parameter(
         HelpMessage="The name of the AttributeSet. Default: AppManagementPolicy"
     )]
     [string]$CustomSecurityAttributeSet = "AppManagementPolicy",
     [Parameter(
-        HelpMessage="The name of the existing AttributeSet for the CustomSecurityAttribute. Default: NonDefaultUriAddition"
+        HelpMessage="The name of the existing AttributeSet for the CustomSecurityAttribute. Default: Matches the Restriction parameter value."
     )]
-    [string]$CustomSecurityAttributeName = "NonDefaultUriAddition",
+    [string]$CustomSecurityAttributeName = $Restriction,
     [Parameter(
         HelpMessage="The value of the CustomSecurityAttribute. Default: Exempt"
     )]
@@ -124,6 +136,7 @@ param(
     )]
     [bool]$WhatIf = $false
 )
+
 Write-Host "Script starting. Confirming environment setup..."
 Import-Module $PSScriptRoot\Modules\SetCustomSecurityAttribute.psm1 -Force
 Set-DebugCustomSecurityAttributes($DebugPreference)
@@ -152,42 +165,59 @@ if ($true -eq $WhatIf) {
     Write-Warning "To update the policy in Entra ID, re-run the script with What-If mode off using param '-WhatIf `$false`'."
 }
 
-# Get the Principal type and ensure the object exists.
-$principalType = Invoke-GetPrincipalType -PrincipalId $Id
+try {
+    # Get the Principal type and ensure the object exists.
+    $principalType = Invoke-GetPrincipalType -PrincipalId $Id
 
-if ($null -eq $principalType) {
-    Write-Debug "Unable to find principal object in tenant. Exiting."
-    Write-Error "Principal $Id not found in tenant $TenantId. Unable to remove CustomSecurityAttribute from non-existent principal."
-    if ($true -eq $Logout) {
-        Start-Logout
+    if ($null -eq $principalType) {
+        Write-Error "Principal $Id not found in tenant $TenantId. Unable to remove CustomSecurityAttribute from non-existent principal."
+
+        Invoke-Exit $Logout
+        return
     }
-    Exit
-}
 
-# Assign the CSA to the Principal
-Remove-CSAFromPrincipal -attributeSetName $CustomSecurityAttributeSet  `
-                   -csaName $CustomSecurityAttributeName `
-                   -csaValue $CustomSecurityAttributeValue `
-                   -principalId $Id `
-                   -principalType $principalType `
-                   -whatIf $WhatIf
+    $CustomSecurityAttributeSet = Set-CustomSecurityAttributeStringLength `
+        -customSecurityAttributeStr $CustomSecurityAttributeSet `
+        -strName "CustomSecurityAttributeSet"
 
-if ($true -eq $Logout) {
-    Start-Logout
+    $CustomSecurityAttributeName = Set-CustomSecurityAttributeStringLength `
+        -customSecurityAttributeStr $CustomSecurityAttributeName `
+        -strName "CustomSecurityAttributeName"
+
+    # Remove the CSA from the Principal
+    Remove-CSAFromPrincipal `
+        -attributeSetName $CustomSecurityAttributeSet `
+        -csaName $CustomSecurityAttributeName `
+        -csaValue $CustomSecurityAttributeValue `
+        -principalId $Id `
+        -principalType $principalType `
+        -whatIf $WhatIf
+
+} catch {
+    Write-Error "An error occurred while processing the script."
+    Write-Error "Error details: $($_.Exception.Message)"
+    
+    Invoke-Exit $Logout
+    return
 }
 
 if ($true -eq $WhatIf) {
     Write-Warning "What-If mode is ON"
-    Write-Warning "The script was run with no -WhatIf parameter or with '-WhatIf `$true`'."
-    Write-Warning "Tenant application management policy was not updated in Entra ID."
+    Write-Warning "The script was run with '-WhatIf `$true`'."
+    Write-Warning "No exemption was removed from the caller principal with ID '$Id' in Entra ID."
+
+    Invoke-Exit $Logout
+    return
 }
 
-Write-Message -Message “Exemption successfully removed. Principal with ID {$Id} can no longer add custom identifier URIs to Entra applications.”
+Write-Message -Message "Exemption from restriction '$Restriction' successfully removed. Principal with ID {$Id} can no longer add custom identifier URIs to Entra applications."
+
+Invoke-Exit $Logout
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2YlVka4Qx21sG
-# PLyb5wHu8w+dKNoelXG6tSXwbsD0oaCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAHZMLmU5W6RH5M
+# xdtRveOLe5DTNDdR+Nf8OZ0k69R4RqCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -208,11 +238,11 @@ Write-Message -Message “Exemption successfully removed. Principal with ID {$Id
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIDlwXpV5G5mbjs0I0mSHcaGSdYoC1YzByXTN
-# zyPtCqIzMA0GCSqGSIb3DQEBAQUABIIBAD+9c3WfKkNd4ctpZ90XWOEHQhYk70fm
-# v3LGdy8POHUh29HSa9ICThIAQCLcmRa/YNclLVZIm7uyse7ZAC0qknuyFVX+SNbK
-# EzCBQELYNHWlSWKoYCjaYvzCXHbj6tTw2obBugJNZbjSOObYcjgT5Es3OJpb95oD
-# YQ14uxUfSuL5sydXi4mkDbc/nG2ZMKG/w6XTyJ3q+0Do5MAopun38kpyKTmYmrgk
-# 9KRBpGnZzOYfsNH/8qgwLyrrdnzw3xLexuOZaAevqCpkIgNG0qBfq5eP6Vbkc9mb
-# b/+WECqz74SB8HeilMAtRCYzMah2/40mafYAZAl+/RoJzXPPI5zZN9o=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIDOjtoSRECG4fnQL149yCyDbmt88horCIyca
+# dcAk3M5oMA0GCSqGSIb3DQEBAQUABIIBAEioAuhk3x07CST7r5lA1BrcXs0z8hQR
+# T8F11aJqIs+JNiII9Nc/IbPU70lowUKxPqXH7khqRMC04eLiYc+mkBfNyHhMT3Sq
+# 7G8EqojF0/lC74YjuzZX1UlDl11v/gSfBDwuswT7ENnibYSadUGPhwpl2cre64WT
+# 9SPEsTgZjPf/uBjkYvcgdwRnrsmdwWWUtuTihm2+DexB99xfPpXNeKjCgr0c9R+5
+# Qc5pTx0g7Hv5voXhI6iYEOb3LhVd3BDXZ7KP/97+2JowHmJYxYUUL9+ARcKPPWUk
+# gdKxY6IyB5bdwiqGSs7IimuYk6GIkfIWRvPZROvRnFfED8QipmI1D+o=
 # SIG # End signature block

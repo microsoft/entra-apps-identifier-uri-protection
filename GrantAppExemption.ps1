@@ -48,6 +48,9 @@
     -WhatIf=true will run the script in a what-if mode and only log the updated policies `
     without actually updating them in Entra ID. Run with -WhatIf=false to update the policies.
     Default: False
+.PARAMETER Restriction
+    The restriction to exempt: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'.
+    Default: uriAdditionWithoutUniqueTenantIdentifier
 .EXAMPLE
     GrantAppExemption.ps1 -AppId "12345678-1234-1234-1234-123456789012" -WhatIf $true
     To run the script and review the log output without updating any objects in the tenant. Used to verify the script actions before committing the changes to the tenant.
@@ -66,6 +69,9 @@
     GrantAppExemption.ps1 -AppId "12345678-1234-1234-1234-123456789012" -WhatIf $false -Login $false
 
     To run the script in both -WhatIf modes without repeating the login flow.
+.EXAMPLE
+    GrantAppExemption.ps1 -AppId "12345678-1234-1234-1234-123456789012" -Restriction "nonDefaultUriAddition" -WhatIf $true
+    To run the script and review the log output without updating any objects in the tenant for the specified restriction.
 .NOTES
     Author: Zachary Allison
     Date:   06 Dec 2024
@@ -74,7 +80,7 @@
 param(
     [Parameter(
         HelpMessage="The Application AppId to assign exemption to. Required.",
-        Mandatory=$true
+        Mandatory = $true
     )]
     [string]$AppId,
     [Parameter(
@@ -100,9 +106,16 @@ param(
         HelpMessage="-WhatIf=true will run the script in a what-if mode and only log the updated policies `
         without actually updating them in Entra ID. Run with -WhatIf=false to update the policies. Default: False"
     )]
-    [bool]$WhatIf = $false
+    [bool]$WhatIf = $false,
+    [Parameter(
+        HelpMessage="The restriction to exempt: 'nonDefaultUriAddition' or 'uriAdditionWithoutUniqueTenantIdentifier'. Default: uriAdditionWithoutUniqueTenantIdentifier"
+    )]
+    [ValidateSet("uriAdditionWithoutUniqueTenantIdentifier", "nonDefaultUriAddition")]
+    [string]$Restriction = "uriAdditionWithoutUniqueTenantIdentifier"
 )
+
 Write-Host "Script starting. Confirming environment setup..."
+
 Import-Module $PSScriptRoot\Modules\SetPolicyOnApp.psm1 -Force
 Import-Module $PSScriptRoot\Modules\Application.psm1 -Force
 
@@ -132,60 +145,77 @@ if ($true -eq $WhatIf) {
     Write-Warning "The script will not update the tenant application management policy in Entra ID but will log the updated policy."
     Write-Warning "To update the policy in Entra ID, re-run the script with What-If mode off using param '-WhatIf `$false`'."
 }
+
 $defaultDisabledPolicyName = "Identifier URI addition exemption"
 $application = Get-AppByAppId -AppId $AppId
 $appObjId = $application.id
 
-# Get the existing policy for the App or the tenant policy if none exist.
-$oldPolicy = Get-AppManagementPolicyForApp -AppId $appObjId
-$oldPolicyId = $null
-if ($null -eq $oldPolicy){
-    $oldPolicy = New-CustomPolicyForAppId -AppId $appObjId -DisplayName $defaultDisabledPolicyName
-} else {
-    if("disabled" -eq $oldPolicy.restrictions.applicationRestrictions.identifierUris.nonDefaultUriAddition.state){
-        Write-Warning "The application is already exempted from the NonDefaultUriAddition restriction. No further action is required."
-        if ($true -eq $Logout) {
-            Start-Logout
+try {
+    # Get the existing policy for the App or the tenant policy if none exist.
+    $oldPolicy = Get-AppManagementPolicyForApp -AppId $appObjId
+
+    if ($null -ne $oldPolicy) {
+        $RestrictionObj = $oldPolicy.restrictions.applicationRestrictions.identifierUris.$Restriction;
+
+        if ("disabled" -eq $RestrictionObj.state) {
+            Write-Warning "The application is already exempted from the '$Restriction' restriction. No further action is required."
+
+            Invoke-Exit $Logout
+            return
         }
-        Exit
+
+        $oldPolicyId = $oldPolicy.id
+        $oldPolicy.PSObject.Properties.Remove("id")
+        $oldPolicy.displayName = $oldPolicy.displayName + " with Identifier URI addition exemption"
+        $oldPolicy.description = "This policy was duplicated from policy with id $oldPolicyId. An exemption to the restriction blocking the addition of non-default identifier URIs was added."
+        
+        # DisplayName should not exceed 256 characters
+        if ($oldPolicy.displayName.Length -gt 256) {
+            $oldPolicy.displayName = $oldPolicy.displayName.Substring(0, 256)
+        }
+
     }
-    $oldPolicyId = $oldPolicy.id
-    $oldPolicy.PSObject.Properties.Remove("id")
-    $oldPolicy.displayName = $oldPolicy.displayName + " with Identifier URI addition exemption"
-    $oldPolicy.description = "This policy was duplicated from policy with id $oldPolicyId.  An exemption to the restriction blocking the addition of non-default identifier URIs was added."
-    # DisplayName should not exceed 256 characters
-    if ($oldPOlicy.displayName.Length -gt 256){
-        $oldPolicy.displayName = $oldPolicy.displayName.Substring(0, 256)
+
+    if ($null -eq $oldPolicy) {
+        # Create an empty policy with the default disabled policy name
+        $oldPolicy = New-CustomPolicyForAppId -AppId $appObjId -DisplayName $defaultDisabledPolicyName
     }
-}
 
-# Assign to existing policy if it already exists
-$newPolicy = Get-ExistingNonDefaultUriCustomPolicy -PolicyName $defaultDisabledPolicyName
+    # Assign to existing policy if it already exists
+    $newPolicy = Get-ExistingNonDefaultUriCustomPolicy -PolicyName $defaultDisabledPolicyName
 
-if ($null -eq $newPolicy){
-    # Create new policy with nondefaultUriAddition disabled
-    $newPolicy = Invoke-CreateNewPolicyWithNonDefaultUriAdditionDisabled -Policy $oldPolicy -WhatIf $WhatIf
-}
+    if ($null -eq $newPolicy) {
+        # Create new policy with nondefaultUriAddition disabled
+        $newPolicy = Invoke-CreateNewPolicyWithDisabledRestriction -Policy $oldPolicy -RestrictionTypeName $Restriction -WhatIf $WhatIf
+    }
 
-# Assign Policy to App
-Invoke-AssignPolicyToApp -AppId $appObjId -Policy $newPolicy -OldPolicyId $oldPolicyId -WhatIf $WhatIf
+    # Assign Policy to App
+    Invoke-AssignPolicyToApp -AppId $appObjId -Policy $newPolicy -OldPolicyId $oldPolicyId -WhatIf $WhatIf
 
-if ($true -eq $Logout) {
-    Start-Logout
+} catch {
+    Write-Error "An error occurred while processing the application exemption."
+    Write-Error "Error details: $($_.Exception.Message)"
+
+    Invoke-Exit $Logout
+    return
 }
 
 if ($true -eq $WhatIf) {
     Write-Warning "What-If mode is ON"
-    Write-Warning "The script was run with no -WhatIf parameter or with '-WhatIf `$true`'."
-    Write-Warning "The application was not granted an exemption in Entra ID."
+    Write-Warning "The application with app Id '$AppId' was not granted an exemption in Entra ID."
+
+    Invoke-Exit $Logout
+    return
 }
 
-Write-Message “Exemption successfully granted to app with app ID {$AppId}. This application can now have custom identifier URIs added to it.”
+Write-Message "Exemption from restriction '$Restriction' successfully granted to application with app Id '$AppId'. This application can now have custom identifier URIs added to it."
+
+Invoke-Exit $Logout
 # SIG # Begin signature block
 # MIIFxQYJKoZIhvcNAQcCoIIFtjCCBbICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC61v83iumrjWX7
-# 0u6MrZDiO1cOfT2PvRbtn5jqpjuExaCCAzowggM2MIICHqADAgECAhBuQViVGZw2
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsKx/tFd//nZep
+# ANfiQjQHY3/eJmn1x0h/wYPKV4qFcKCCAzowggM2MIICHqADAgECAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCSqGSIb3DQEBCwUAMCQxIjAgBgNVBAMMGVRlc3RBenVyZUVu
 # Z0J1aWxkQ29kZVNpZ24wHhcNMTkxMjE2MjM1NDA5WhcNMzAwNzE3MDAwNDA5WjAk
 # MSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduMIIBIjANBgkqhkiG
@@ -206,11 +236,11 @@ Write-Message “Exemption successfully granted to app with app ID {$AppId}. Thi
 # ODAkMSIwIAYDVQQDDBlUZXN0QXp1cmVFbmdCdWlsZENvZGVTaWduAhBuQViVGZw2
 # u08Xv6xOUdioMA0GCWCGSAFlAwQCAQUAoHwwEAYKKwYBBAGCNwIBDDECMAAwGQYJ
 # KoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQB
-# gjcCARUwLwYJKoZIhvcNAQkEMSIEIGp4Ez6ADUrpH7Hi1olwll6pjBGMZJ06nGtA
-# VjXQGQfQMA0GCSqGSIb3DQEBAQUABIIBAIMEDXIba5oeY6/TNnAfjaJGPEQptcz5
-# qz5lQ6O6oRHDTsHhsPyWzpYPolfxepdcyjZeWC4kv6b8SdadOq76OJW5PEhmvvVL
-# 0aqX9fCEc+ZbMMV+s1XvOzJAfko+MnNrko+g0mbQGK9wb762V5T7MkVqr1q03bgq
-# qOmm1MP/qU5c5SRcAzggpQm1pKMqgb9ntIpfYyf6wowEH/TpEBsfpKshF2mXY5I3
-# DTV6Pq7XqSP3DrOx+QtkhA/ScXKqjTojPCYA4SQ9UWmCnuip7LwEYovGiTChGTTF
-# xUqjBtL+/Fgh81HgykeMtggxNn3WP67Zpnw4CiqmurY9phqDiK/Q2M4=
+# gjcCARUwLwYJKoZIhvcNAQkEMSIEIGbbfC1IA7109ROrlMH2N4ymce6Kri1SReiC
+# Kfjdv5HeMA0GCSqGSIb3DQEBAQUABIIBAD75Z5Y9BhDlffCoqEtUcpRlgxv5CSlE
+# cI/fy+qnzHre0ezO/+cP617B2XDBlB2T1+WIRjIIg9KHIpb7c+hNWkRk3sAhfXof
+# 4k3CFX5N9e+XYRlGKrfHcPw9rNf0adYBQsYPyo27ASxll4BGJarF2fFP69EDCUgY
+# FjjULUiB0QF1E4JasbygmazX5k9l3OcmtQbBtC0P4Zz3fhhbjWstIMqtVrbRHoxy
+# ndFF4eHfvxuyILSewIORiMvwlg85/KeVfF2NovQJYhDT37IPKjp3y77oPCchsAbj
+# 0396faI6JGmi20qcbMmcNTtqdP79vXh/Dvnuu1Va/l3qb9+Sjohpjno=
 # SIG # End signature block
