@@ -17,7 +17,7 @@ First, compile a list of application IDs that were recently created or updated i
 
 Go to the [App registrations](https://aka.ms/ra/prod) experience to look up these applications by their app ID.  Input the application ID in the search bar.  If you can't find the application, it was likely deleted.
 
-As a reminder, the applications in this list were updated in a way that violates the identifier URI policy.  This means they had an identifier URI (also known as app ID URI) added that does not comply with the [secure formats](../README.md#secure-formats).  You can view the full set of the application's `identifierUris` using the `Manifest` page.  You can also view one of the application's `identifierUris` using the `Expose an API` page.
+As a reminder, the applications in this list were updated in a way that violates the identifier URI policy.  This means they had an identifier URI (also known as app ID URI) added that does not comply with the [secure formats](README.md#secure-formats).  You can view the full set of the application's `identifierUris` using the `Manifest` page.  You can also view one of the application's `identifierUris` using the `Expose an API` page.
 
 For each application, identify the owner (using the `Owners` page) or other technical contact who can discuss how and why the application was updated.
 
@@ -51,11 +51,11 @@ You can either fix or exempt workflows that may make future requests blocked by 
 
 To fix them, ensure the workflow does one of the following when it configures the `identifierUris` property on Entra apps.
 
-1. Ensure the URI follows the [formatting rules](../README.md#secure-formats), or
+1. Ensure the URI follows the [formatting rules](README.md#secure-formats), or
 1. Update the app to accept [v2 tokens](https://aka.ms/identifier-uri-policy#guidance-for-developers)
 
 ### Exempt them
 
-You can also exempt workflows, so you can apply the protection to the rest of your tenant while you work on updating impacted workflows.  You can configure exceptions on the [app(s) being updated](../README.md#grant-an-app-an-exemption), on the [users making the request(s)](../README.md#grant-a-user-service-or-process-an-exemption), or on the [service making the request](../README.md#grant-a-user-service-or-process-an-exemption).  
+You can also exempt workflows, so you can apply the protection to the rest of your tenant while you work on updating impacted workflows.  You can configure exceptions on the [app(s) being updated](README.md#grant-an-app-an-exemption), on the [users making the request(s)](README.md#grant-a-user-service-or-process-an-exemption), or on the [service making the request](README.md#grant-a-user-service-or-process-an-exemption).  
 
 You can apply long-lived exceptions to admin users, or to services that set identifier URIs without accepting user input on what the URI should be.  Any other exception should be scoped and short-term.
