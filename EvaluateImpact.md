@@ -1,12 +1,12 @@
 # Evaluate the impact of enabling identifier URI protection
 
-Microsoft recommends that all orgaizations enable the recently released [identifier URI protection](../README.md#what-to-expect).  However, enabling this policy may cause impact to admin and developer workflows in some organizations.  This page will describe how to identify impacted workflows, and recommendations on how to fix or exempt them, before enabling the policy.
+Microsoft recommends that all orgaizations enable the recently released [identifier URI protection](README.md).  However, enabling this policy may cause impact to admin and developer workflows in some organizations.  This page will describe how to identify impacted workflows, and recommendations on how to fix or exempt them, before enabling the policy.
 
 ## Identify impacted workflows
 
 Identifying impacted workflows involves the following steps:
 
-1. Identify Entra applications that were recently updated in a way that violates [the policy](../README.md#what-to-expect)
+1. Identify Entra applications that were recently updated in a way that violates [the policy](README.md#what-to-expect)
 1. Discuss how and why those applications had those identifier URIs added with the application owners
 1. [Optional] Find the directory audit log events for recent app creation or update events in violation of the policy
 1. Using the above information, identify the users or services with dependencies on this operation
