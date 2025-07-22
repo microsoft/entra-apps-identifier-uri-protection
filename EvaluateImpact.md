@@ -13,7 +13,7 @@ Identifying impacted workflows involves the following steps:
 
 ### Identify updated applications
 
-First, compile a list of application IDs that were recently created or updated in a way that violates the policy.  You can get this list of applications from the communication sent by Microsoft labeled `todo`.  The communication will list up to 20 app IDs of applications that were recently modified in a way that violates the policy.  If the communication contains less than 20 app IDs, then that list is the full set of modified applications Microsoft has recorded for your tenant.  If the communication contains 20 app IDs, you can get a longer list by [filing a support case](https://aka.ms/entrasupt).
+First, compile a list of application IDs that were recently created or updated in a way that violates the policy.  You can get this list of applications from the communication sent by Microsoft labeled `Action recommended: Enable a new security setting in Microsoft Entra ID`.  The communication will list up to 20 app IDs of applications that were recently modified in a way that violates the policy.  If the communication contains less than 20 app IDs, then that list is the full set of modified applications Microsoft has recorded for your tenant.  If the communication contains 20 app IDs, you can get a longer list by [filing a support case](https://aka.ms/entrasupt).
 
 Go to the [App registrations](https://aka.ms/ra/prod) experience to look up these applications by their app ID.  Input the application ID in the search bar.  If you can't find the application, it was likely deleted.
 
