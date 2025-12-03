@@ -7,7 +7,7 @@ Granting an app an exemption involves two steps:
 
 ## Create a custom policy (one-time step)
 
-First, you need to create a custom policy that grants an exemption to the identifier URI restrictiction.  This is a one-time creation operation; you can re-use this custom policy for all apps that need an exemption.
+First, you need to create a custom policy that grants an exemption to the identifier URI restriction.  This is a one-time creation operation; you can re-use this custom policy for all apps that need an exemption.
 
 Make the following requests in Microsoft Graph creating a custom [app management policy](https://learn.microsoft.com/en-us/graph/api/resources/appmanagementpolicy?view=beta):
 
@@ -15,6 +15,8 @@ Make the following requests in Microsoft Graph creating a custom [app management
 POST https://graph.microsoft.com/beta/policies/appManagementPolicies
 
 {
+    "displayName": "Identifier URI restriction exemption policy",
+    "description": "To exempt app from identifier URI restriction policy",
     "isEnabled": true,
     "applicationRestrictions": {
         "identifierUris": {
